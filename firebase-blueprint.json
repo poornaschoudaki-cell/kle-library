@@ -1,0 +1,42 @@
+{
+  "entities": {
+    "Book": {
+      "title": "Book",
+      "description": "Information about a book in the library system.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "description": "The title of the book." },
+        "author": { "type": "string", "description": "The author of the book." },
+        "isbn": { "type": "string", "description": "The unique ISBN of the book." },
+        "category": { "type": "string", "description": "The genre or category." },
+        "status": { "type": "string", "enum": ["available", "borrowed", "reserved"], "description": "Current availability status." },
+        "coverUrl": { "type": "string", "format": "uri", "description": "URL to the book cover image." },
+        "addedAt": { "type": "string", "format": "date-time", "description": "When the book was added to the library." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "When the book details were last updated." }
+      },
+      "required": ["title", "author", "isbn", "status"]
+    },
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "User account details including library role.",
+      "type": "object",
+      "properties": {
+        "displayName": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["user", "employee", "admin"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "role"]
+    }
+  },
+  "firestore": {
+    "/books/{bookId}": {
+      "schema": "Book",
+      "description": "Library book catalog."
+    },
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profiles with role-based access."
+    }
+  }
+}

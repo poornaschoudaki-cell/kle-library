@@ -1,0 +1,110 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net (Deny-All)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 1. Global Helpers
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function getUserData(userId) {
+      return get(/databases/$(database)/documents/users/$(userId)).data;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+             getUserData(request.auth.uid).role == 'admin';
+    }
+
+    function isEmployee() {
+      return isSignedIn() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+             getUserData(request.auth.uid).role == 'employee';
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // 2. Books Collection - Standard Public Read
+    match /books {
+      allow list: if true;
+      match /{bookId} {
+        function isValidBook(data) {
+          return data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
+                 data.author is string && data.author.size() > 0 && data.author.size() <= 200 &&
+                 data.isbn is string && data.isbn.size() > 0 && data.isbn.size() <= 50 &&
+                 data.status in ['available', 'borrowed', 'reserved'] &&
+                 (!('coverUrl' in data) || (data.coverUrl is string && data.coverUrl.size() <= 1000));
+        }
+
+        allow get: if true;
+
+        allow create: if (isAdmin() || isEmployee()) && isValidBook(incoming()) && isValidId(bookId);
+
+        allow update: if (
+          (isAdmin() || isEmployee()) && isValidBook(incoming())
+        ) || (
+          // Action: Self-Allocation (Student)
+          isSignedIn() && 
+          isValidBook(incoming()) &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'borrowedBy', 'borrowedAt', 'updatedAt']) &&
+          existing().status == 'available' &&
+          incoming().status == 'borrowed' &&
+          incoming().borrowedBy == request.auth.uid &&
+          incoming().borrowedAt == request.time
+        );
+
+        allow delete: if (isAdmin() || isEmployee()) && isValidId(bookId);
+      }
+    }
+
+    // 3. Users Collection
+    match /users/{userId} {
+      function isValidUserProfile(data) {
+        return data.email is string && data.email.size() <= 100 &&
+               data.role in ['user', 'employee', 'admin'] &&
+               data.displayName is string && data.displayName.size() <= 100 &&
+               (!('createdAt' in data) || data.createdAt is timestamp) &&
+               (!('updatedAt' in data) || data.updatedAt is timestamp);
+      }
+
+      // Allow a user to read their own profile, or an admin/employee to read any profile
+      allow get: if isOwner(userId) || isAdmin() || isEmployee();
+      
+      // Only admins can list all users
+      allow list: if isAdmin();
+
+      allow create: if isOwner(userId) && isValidUserProfile(incoming()) && 
+                    (incoming().role == 'user' || (incoming().email == 'poornaschoudaki@gmail.com' && incoming().role == 'admin'));
+
+      allow update: if (
+        isSignedIn() && isValidUserProfile(incoming()) && (
+          // Action: Profile Update (Student/Owner) - Cannot change role
+          (isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'updatedAt'])) ||
+          // Action: Admin Management - Can change roles
+          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['role', 'displayName', 'updatedAt']))
+        )
+      );
+      
+      allow delete: if isAdmin();
+    }
+  }
+}
